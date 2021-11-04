@@ -27,14 +27,29 @@ typedef std::array<double,7> J;
 J joint_states={0,0,0,0,0,0,0};
 void ctrlchandler(int){exit(EXIT_SUCCESS);}
 void killhandler(int){exit(EXIT_SUCCESS);}
+franka::RobotState robot_state;
+
 void rosJointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
 	for(int i = 0;i<7;i++)
-		joint_states.at(i) = msg->position[i+2];
+		robot_state.q.at(i) = msg->position[i+2];
+}
+void rosDesiredJointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
+{
+	for(int i = 0;i<7;i++){
+		robot_state.q_d.at(i) = msg->position[i+2];
+		robot_state.dq_d.at(i) = msg->position[i+2];
+	}
 }
 void rosRobotStateCallback(const franka_core_msgs::RobotState::ConstPtr& msg)
 {
 
+}
+void printJ(J input,char* str){
+	std::cout<<"\t"<<str<<" : ";
+	for(int i = 0;i<6;i++)
+		std::cout<<input.at(i)<<",";
+	std::cout<<input.at(6)<<std::endl;
 }
 namespace {
 class Controller {
@@ -50,8 +65,9 @@ class Controller {
   inline franka::Torques step(const franka::RobotState& state) {
     updateDQFilter(state);
     std::array<double, 7> tau_J_d;  // NOLINT(readability-identifier-naming)
+
     for (size_t i = 0; i < 7; i++) {
-      tau_J_d[i] = K_P_[i] * (state.q_d[i] - state.q[i]) + K_D_[i] * (dq_d_[i] - getDQFiltered(i));
+      tau_J_d[i] = K_P_[i] * (q_d_[i] - state.q[i]) + K_D_[i] * (dq_d_[i] - getDQFiltered(i));
     }
     return tau_J_d;
   }
@@ -68,12 +84,30 @@ class Controller {
     }
     return value / dq_filter_size_;
   }
+  void printJ(J input,char* str){
+	std::cout<<"\t"<<str<<" : ";
+	for(int i = 0;i<6;i++)
+		std::cout<<input.at(i)<<",";
+	std::cout<<input.at(6)<<std::endl;
+ }
+  void setDesired(std::array<double, 7> q, std::array<double, 7> dq){
+  	for(int i =0;i<7;i++){
+  		dq_d_[i] = dq[i];
+  		q_d_[i] = q[i];
+  	}
+  	//printJ(dq_d_,"dq_d_");
+  	//printJ(q_d_,"q_d_");
+
+  }
  private:
   size_t dq_current_filter_position_;
   size_t dq_filter_size_;
   const std::array<double, 7> K_P_;  // NOLINT(readability-identifier-naming)
   const std::array<double, 7> K_D_;  // NOLINT(readability-identifier-naming)
   std::array<double, 7> dq_d_;
+  std::array<double, 7> q_d_;
+
+
   std::unique_ptr<double[]> dq_buffer_;
 };
 std::vector<double> generateTrajectory(double a_max) {
@@ -132,12 +166,7 @@ bool loadJson(Json::Value& input,char* JSON_FILE){
 	return 1;
 
 }
-void printJ(J input,char* str){
-	std::cout<<"\t"<<str<<" : ";
-	for(int i = 0;i<6;i++)
-		std::cout<<input.at(i)<<",";
-	std::cout<<input.at(6)<<std::endl;
-}
+
 
 int main(int argc, char** argv) {
 	if(argc == 2){
@@ -160,20 +189,34 @@ int main(int argc, char** argv) {
 			q_goal.at(i) = rootr[robot_name]["init_q"][i].asFloat();
 	else
 		return 0;
-
+	for(int i = 0;i<7;i++)
+		robot_state.q_d.at(i) =q_goal.at(i);
 
 	printJ(q_goal,"init_q");
 
 
   const size_t joint_number{3};
   const size_t filter_size{5};
+  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
+  //const std::array<double, 7> K_P{{200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0}};
+  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
+  //const std::array<double, 7> K_D{{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0}};
+
+ // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
+  const std::array<double, 7> K_P{{100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0}};
+  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
+  const std::array<double, 7> K_D{{5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0}};
+
   // NOLINTNEXTLINE(readability-identifier-naming)
-  const std::array<double, 7> K_P{{200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0}};
+  //const std::array<double, 7> K_P{{2000.0, 2000.0, 2000.0, 2000.0, 2000.0, 2000.0, 2000.0}};
   // NOLINTNEXTLINE(readability-identifier-naming)
-  const std::array<double, 7> K_D{{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0}};
+ // const std::array<double, 7> K_D{{100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0}};
+
+
+  
+
   const double max_acceleration{1.0};
   Controller controller(filter_size, K_P, K_D);
-  franka::RobotState robot_state;
 
 	try{ros::init(argc,argv,"trajectory_subscriber");}
 	catch(int e){ctrlchandler(1);}
@@ -183,47 +226,68 @@ int main(int argc, char** argv) {
 	ros::NodeHandle nh2;
 
 	ros::Subscriber sub = nh.subscribe("/panda_simulator/custom_franka_state_controller/joint_states", 1,rosJointStateCallback); 
+	ros::Subscriber desired_sub = nh.subscribe("/desired_joint_states", 1,rosDesiredJointStateCallback); 
+
 	ros::Subscriber sub2 = nh.subscribe("/panda_simulator/custom_franka_state_controller/robot_state", 1,rosRobotStateCallback); 
 
 
 	ros::Publisher pub =  nh2.advertise<franka_core_msgs::JointCommand>("/panda_simulator/motion_controller/arm/joint_commands", 1);
 
 
-	ros::Rate r(100);
+	ros::Rate r(1000);
 	std::cout<<"ROS JOINT CONTROLLER IS ON"<<std::endl;
-	franka_core_msgs::JointCommand pubmsg = franka_core_msgs::JointCommand();
+	franka_core_msgs::JointCommand pubmsg;
 	
-	pubmsg.header.stamp = ros::Time::now();
-	pubmsg.header.frame_id = "";
 	
-
-	pubmsg.names.push_back("panda_joint1");
-	pubmsg.names.push_back("panda_joint2");
-	pubmsg.names.push_back("panda_joint3");
-	pubmsg.names.push_back("panda_joint4");
-	pubmsg.names.push_back("panda_joint5");
-	pubmsg.names.push_back("panda_joint6");
-	pubmsg.names.push_back("panda_joint7");
-
-
-
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
-	pubmsg.effort.push_back(10000.0);
 
 
 	pubmsg.mode =pubmsg.TORQUE_MODE;
-
+	unsigned int count = 0;
 	while (ros::ok()){
 	pubmsg.header.stamp = ros::Time::now();
 
 		franka::Torques tq = controller.step(robot_state);
-		printJ(tq.tau_J,"tau");
-		printJ(joint_states,"jt");
+		//printJ(tq.tau_J,"tau");
+		//printJ(robot_state.q,"jt");
+		std::cout<<count<<std::endl;
+		if(count>10000 ){
+			for(int i = 0;i<7;i++)
+				robot_state.q_d.at(i) =0.0;
+			count = 0;
+		}
+		count++;
+		controller.setDesired(robot_state.q_d,robot_state.dq_d);
+
+
+		pubmsg = franka_core_msgs::JointCommand();
+
+		pubmsg.header.stamp = ros::Time::now();
+		pubmsg.header.frame_id = "";
+
+
+		pubmsg.names.push_back("panda_joint1");
+		pubmsg.names.push_back("panda_joint2");
+		pubmsg.names.push_back("panda_joint3");
+		pubmsg.names.push_back("panda_joint4");
+		pubmsg.names.push_back("panda_joint5");
+		pubmsg.names.push_back("panda_joint6");
+		pubmsg.names.push_back("panda_joint7");
+
+
+
+		pubmsg.effort.push_back(tq.tau_J.at(0));
+		pubmsg.effort.push_back(tq.tau_J.at(1));
+		pubmsg.effort.push_back(tq.tau_J.at(2));
+		pubmsg.effort.push_back(tq.tau_J.at(3));
+		pubmsg.effort.push_back(tq.tau_J.at(4));
+		pubmsg.effort.push_back(tq.tau_J.at(5));
+		pubmsg.effort.push_back(tq.tau_J.at(6));
+
+
+		pubmsg.mode =pubmsg.TORQUE_MODE;
+
+
+
 
 
         pub.publish(pubmsg);
