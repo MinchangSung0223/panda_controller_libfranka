@@ -18,13 +18,6 @@
 
 void ctrlchandler(int){exit(EXIT_SUCCESS);}
 void killhandler(int){exit(EXIT_SUCCESS);}
-int trig_command = 0;
-std::vector<std::array<double,7>> q_list;
-std::array<double, 7> q_goal = {{0, 0, 0, 0, 0, 0, 0}};
-std::array<double, 7>  move_joint_values= {{0.000 ,-0.785, 0.000, -2.356, 0.000, 1.571 ,1.585}};
-void print_q(std::array<double, 7> q ){
-	std::cout<<q[0]<<","<<q[1]<<","<<q[2]<<","<<q[3]<<","<<q[4]<<","<<q[5]<<","<<q[6]<<std::endl;
-}
 void rosJointStateCallback(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
 {
 	
@@ -98,6 +91,12 @@ std::vector<double> generateTrajectory(double a_max) {
   return trajectory;
 }
 }  // anonymous namespace
+
+
+
+
+
+
 int main(int argc, char** argv) {
   if (argc != 4) {
     std::cerr << "Usage: " << argv[0] << " <robot-hostname> <simulation> <end_time>" << std::endl;

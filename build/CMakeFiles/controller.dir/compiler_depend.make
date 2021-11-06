@@ -1261,6 +1261,8 @@ CMakeFiles/controller.dir/src/controller.cpp.o: ../src/controller.cpp \
   /opt/ros/noetic/include/libfranka/franka/robot.h \
   /opt/ros/noetic/include/libfranka/franka/command_types.h \
   /opt/ros/noetic/include/libfranka/franka/lowpass_filter.h \
+  /opt/ros/noetic/include/libfranka/franka/model.h \
+  /opt/ros/noetic/include/libfranka/franka/rate_limiting.h \
   /root/catkin_ws/devel/include/franka_core_msgs/JointCommand.h \
   /root/catkin_ws/devel/include/franka_core_msgs/RobotState.h \
   /opt/ros/noetic/include/franka_msgs/Errors.h \
@@ -1533,6 +1535,8 @@ CMakeFiles/controller.dir/src/controller.cpp.o: ../src/controller.cpp \
 /root/catkin_ws/devel/include/franka_core_msgs/RobotState.h:
 
 /root/catkin_ws/devel/include/franka_core_msgs/JointCommand.h:
+
+/opt/ros/noetic/include/libfranka/franka/rate_limiting.h:
 
 /opt/ros/noetic/include/libfranka/franka/lowpass_filter.h:
 
@@ -3407,6 +3411,8 @@ CMakeFiles/controller.dir/src/controller.cpp.o: ../src/controller.cpp \
 /usr/include/boost/predef/other/endian.h:
 
 /usr/include/boost/predef/library/c/_prefix.h:
+
+/opt/ros/noetic/include/libfranka/franka/model.h:
 
 /usr/include/boost/core/alloc_construct.hpp:
 

@@ -1130,6 +1130,8 @@ CMakeFiles/controller.dir/src/controller.cpp.o: \
  /opt/ros/noetic/include/libfranka/franka/robot.h \
  /opt/ros/noetic/include/libfranka/franka/command_types.h \
  /opt/ros/noetic/include/libfranka/franka/lowpass_filter.h \
+ /opt/ros/noetic/include/libfranka/franka/model.h \
+ /opt/ros/noetic/include/libfranka/franka/rate_limiting.h \
  /root/catkin_ws/devel/include/franka_core_msgs/JointCommand.h \
  /root/catkin_ws/devel/include/franka_core_msgs/RobotState.h \
  /opt/ros/noetic/include/franka_msgs/Errors.h \

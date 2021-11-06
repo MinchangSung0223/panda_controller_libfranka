@@ -13,6 +13,9 @@
 #include "spline.h"
 #include <franka/exception.h>
 #include <franka/robot.h>
+#include <franka/model.h>
+#include <franka/rate_limiting.h>
+
 #include <franka_core_msgs/JointCommand.h>
 #include <franka_core_msgs/RobotState.h>
 
@@ -25,25 +28,32 @@
 using namespace std;
 typedef std::array<double,7> J;
 J joint_states={0,0,0,0,0,0,0};
+J coriolis={0,0,0,0,0,0,0};
 void ctrlchandler(int){exit(EXIT_SUCCESS);}
 void killhandler(int){exit(EXIT_SUCCESS);}
 franka::RobotState robot_state;
-
+bool desired_recv=false;
+bool is_sim = true;
 void rosJointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-	for(int i = 0;i<7;i++)
+	for(int i = 0;i<7;i++){
 		robot_state.q.at(i) = msg->position[i+2];
+		robot_state.dq.at(i) = msg->velocity[i+2];
+	}
 }
 void rosDesiredJointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
 	for(int i = 0;i<7;i++){
-		robot_state.q_d.at(i) = msg->position[i+2];
-		robot_state.dq_d.at(i) = msg->position[i+2];
+		robot_state.q_d.at(i) = msg->position[i];
+		robot_state.dq_d.at(i) = msg->position[i];
 	}
+	desired_recv = true;
 }
 void rosRobotStateCallback(const franka_core_msgs::RobotState::ConstPtr& msg)
 {
-
+	for(int i = 0;i<7;i++){
+		coriolis.at(i) = msg->coriolis[i];
+	}
 }
 void printJ(J input,char* str){
 	std::cout<<"\t"<<str<<" : ";
@@ -67,7 +77,7 @@ class Controller {
     std::array<double, 7> tau_J_d;  // NOLINT(readability-identifier-naming)
 
     for (size_t i = 0; i < 7; i++) {
-      tau_J_d[i] = K_P_[i] * (q_d_[i] - state.q[i]) + K_D_[i] * (dq_d_[i] - getDQFiltered(i));
+      tau_J_d[i] = K_P_[i] * (q_d_[i] - state.q[i]) + K_D_[i] * (dq_d_[i] - getDQFiltered(i))+coriolis[i];
     }
     return tau_J_d;
   }
@@ -177,6 +187,11 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
+
+
+
+
+    //***************************JSON LOAD****************************************//
     char* JSON_FILE= argv[1];
     std::string robot_name = "panda_robot";
 
@@ -192,20 +207,24 @@ int main(int argc, char** argv) {
 	for(int i = 0;i<7;i++)
 		robot_state.q_d.at(i) =q_goal.at(i);
 
-	printJ(q_goal,"init_q");
+	is_sim = rootr[robot_name]["is_sim"].asBool();
+	std::string robot_ip = rootr[robot_name]["robot_ip"].asString();
+    //***************************JSON LOAD****************************************//
 
+	std::array<double, 7> K_P_SIM{{20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 10.0}};
+	// SIM ROBOT NOLINTNEXTLINE(readability-identifier-naming)
+	std::array<double, 7> K_D_SIM{{1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.1}};
+	for(int i =0;i<7;i++){
+		K_P_SIM.at(i) = K_P_SIM.at(i)*10;
+		K_D_SIM.at(i) = K_D_SIM.at(i)*10;
+			
+	}
 
   const size_t joint_number{3};
   const size_t filter_size{5};
-  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
-  //const std::array<double, 7> K_P{{200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0}};
-  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
-  //const std::array<double, 7> K_D{{10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0}};
 
- // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
-  const std::array<double, 7> K_P{{100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0}};
-  // REAL ROBOT NOLINTNEXTLINE(readability-identifier-naming)
-  const std::array<double, 7> K_D{{5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0}};
+
+
 
   // NOLINTNEXTLINE(readability-identifier-naming)
   //const std::array<double, 7> K_P{{2000.0, 2000.0, 2000.0, 2000.0, 2000.0, 2000.0, 2000.0}};
@@ -215,8 +234,9 @@ int main(int argc, char** argv) {
 
   
 
-  const double max_acceleration{1.0};
-  Controller controller(filter_size, K_P, K_D);
+	const double max_acceleration{1.0};
+
+	Controller sim_controller(filter_size, K_P_SIM, K_D_SIM);
 
 	try{ros::init(argc,argv,"trajectory_subscriber");}
 	catch(int e){ctrlchandler(1);}
@@ -224,77 +244,154 @@ int main(int argc, char** argv) {
 
 	ros::NodeHandle nh;
 	ros::NodeHandle nh2;
+	ros::Subscriber desired_sub = nh.subscribe("/desired_joint_states", 1,rosDesiredJointStateCallback); 
+	
+
+
+
 
 	ros::Subscriber sub = nh.subscribe("/panda_simulator/custom_franka_state_controller/joint_states", 1,rosJointStateCallback); 
-	ros::Subscriber desired_sub = nh.subscribe("/desired_joint_states", 1,rosDesiredJointStateCallback); 
-
 	ros::Subscriber sub2 = nh.subscribe("/panda_simulator/custom_franka_state_controller/robot_state", 1,rosRobotStateCallback); 
+	ros::Publisher pub =  nh2.advertise<franka_core_msgs::JointCommand>("/panda_simulator/motion_controller/arm/joint_commands", 1);	
 
-
-	ros::Publisher pub =  nh2.advertise<franka_core_msgs::JointCommand>("/panda_simulator/motion_controller/arm/joint_commands", 1);
 
 
 	ros::Rate r(1000);
 	std::cout<<"ROS JOINT CONTROLLER IS ON"<<std::endl;
-	franka_core_msgs::JointCommand pubmsg;
-	
-	
 
-
-	pubmsg.mode =pubmsg.TORQUE_MODE;
 	unsigned int count = 0;
-	while (ros::ok()){
-	pubmsg.header.stamp = ros::Time::now();
+	if(is_sim){
 
-		franka::Torques tq = controller.step(robot_state);
-		//printJ(tq.tau_J,"tau");
-		//printJ(robot_state.q,"jt");
-		std::cout<<count<<std::endl;
-		if(count>10000 ){
-			for(int i = 0;i<7;i++)
-				robot_state.q_d.at(i) =0.0;
-			count = 0;
+		sim_controller.setDesired(robot_state.q_d,robot_state.dq_d);	
+		franka_core_msgs::JointCommand pubmsg;
+		pubmsg.mode =pubmsg.TORQUE_MODE;	
+		J tau ={0,0,0,0,0,0,0};
+		J filtervalue = {0,0,0,0,0,0,0};
+		std::unique_ptr<double[]> dq_buffer_;
+
+		size_t dq_current_filter_position_=0;
+		size_t dq_filter_size_=20;
+
+		while (ros::ok()){
+			pubmsg.header.stamp = ros::Time::now();
+			franka::Torques tq = sim_controller.step(robot_state);
+			double err_sum = 0;
+			for(int i = 0;i<7;i++){
+				tau[i] = K_P_SIM[i]*(robot_state.q_d[i]-robot_state.q[i])+K_D_SIM[i]*(robot_state.dq_d[i]-robot_state.dq[i])+coriolis[i];
+				err_sum += (robot_state.q_d[i]-robot_state.q[i])*(robot_state.q_d[i]-robot_state.q[i]);
+			}
+			err_sum = sqrt(err_sum);
+			//std::cout<<err_sum<<std::endl;
+
+			printJ(robot_state.q,"q");
+			printJ(robot_state.q_d,"q_d");
+/*
+			printJ(tq.tau_J,"tau");
+			printJ(robot_state.q,"jt");
+
+			if(	desired_recv == true){
+				sim_controller.setDesired(robot_state.q_d,robot_state.dq_d);
+				desired_recv = false;
+			}
+*/
+			pubmsg = franka_core_msgs::JointCommand();
+			pubmsg.header.stamp = ros::Time::now();
+			pubmsg.header.frame_id = "";
+
+			pubmsg.names.push_back("panda_joint1");
+			pubmsg.names.push_back("panda_joint2");
+			pubmsg.names.push_back("panda_joint3");
+			pubmsg.names.push_back("panda_joint4");
+			pubmsg.names.push_back("panda_joint5");
+			pubmsg.names.push_back("panda_joint6");
+			pubmsg.names.push_back("panda_joint7");
+/*
+			pubmsg.effort.push_back(tq.tau_J.at(0));
+			pubmsg.effort.push_back(tq.tau_J.at(1));
+			pubmsg.effort.push_back(tq.tau_J.at(2));
+			pubmsg.effort.push_back(tq.tau_J.at(3));
+			pubmsg.effort.push_back(tq.tau_J.at(4));
+			pubmsg.effort.push_back(tq.tau_J.at(5));
+			pubmsg.effort.push_back(tq.tau_J.at(6));
+*/
+			pubmsg.effort.push_back(tau.at(0));
+			pubmsg.effort.push_back(tau.at(1));
+			pubmsg.effort.push_back(tau.at(2));
+			pubmsg.effort.push_back(tau.at(3));
+			pubmsg.effort.push_back(tau.at(4));
+			pubmsg.effort.push_back(tau.at(5));
+			pubmsg.effort.push_back(tau.at(6));
+			pubmsg.mode =pubmsg.TORQUE_MODE;
+			pub.publish(pubmsg);
+
+			ros::spinOnce();
+			r.sleep();
 		}
-		count++;
-		controller.setDesired(robot_state.q_d,robot_state.dq_d);
 
-
-		pubmsg = franka_core_msgs::JointCommand();
-
-		pubmsg.header.stamp = ros::Time::now();
-		pubmsg.header.frame_id = "";
-
-
-		pubmsg.names.push_back("panda_joint1");
-		pubmsg.names.push_back("panda_joint2");
-		pubmsg.names.push_back("panda_joint3");
-		pubmsg.names.push_back("panda_joint4");
-		pubmsg.names.push_back("panda_joint5");
-		pubmsg.names.push_back("panda_joint6");
-		pubmsg.names.push_back("panda_joint7");
-
-
-
-		pubmsg.effort.push_back(tq.tau_J.at(0));
-		pubmsg.effort.push_back(tq.tau_J.at(1));
-		pubmsg.effort.push_back(tq.tau_J.at(2));
-		pubmsg.effort.push_back(tq.tau_J.at(3));
-		pubmsg.effort.push_back(tq.tau_J.at(4));
-		pubmsg.effort.push_back(tq.tau_J.at(5));
-		pubmsg.effort.push_back(tq.tau_J.at(6));
-
-
-		pubmsg.mode =pubmsg.TORQUE_MODE;
-
-
-
-
-
-        pub.publish(pubmsg);
-
-		ros::spinOnce();
-		r.sleep();
 	}
+	else{
+		//*******************************************REAL ROBOT****************************************************************//
+		struct {
+			std::mutex mutex;
+			bool has_data;
+			std::array<double, 7> tau_d_last;
+			franka::RobotState robot_state;
+			std::array<double, 7> gravity;
+		} print_data{};
+		franka::Robot robot(robot_ip);
+		setDefaultBehavior(robot);
+    	std::array<double, 7> q_goal = {{0, -M_PI_4, 0, -3 * M_PI_4, 0, M_PI_2, M_PI_4}};
+    	MotionGenerator motion_generator(0.5, q_goal);
+		std::cout << "경고: 이 예제는 로봇이 움직입니다. "
+		          << "EMERGENCY버튼을 손에 들고 있어주세요" << std::endl
+		          << "Enter키를 누르면 시직합니다." << std::endl;
+		std::cin.ignore();
+		robot.control(motion_generator);
+	    robot.setCollisionBehavior(
+        {{20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}}, {{20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}},
+        {{20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}}, {{20.0, 20.0, 18.0, 18.0, 16.0, 14.0, 12.0}},
+        {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}}, {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}},
+        {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}}, {{20.0, 20.0, 20.0, 25.0, 25.0, 25.0}});
+		franka_core_msgs::JointCommand pubmsg;
+		pubmsg.mode =pubmsg.TORQUE_MODE;	
+		const std::array<double, 7> k_gains = {{600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0}};
+		// Damping
+		const std::array<double, 7> d_gains = {{50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0}};
+	    franka::Model model = robot.loadModel();
+
+		while (ros::ok()){
+
+				std::function<franka::Torques(const franka::RobotState&, franka::Duration)>
+		        impedance_control_callback =
+		            [&print_data, &model, k_gains, d_gains](
+		                const franka::RobotState& state, franka::Duration /*period*/) -> franka::Torques {
+		      // Read current coriolis terms from model.
+		      std::array<double, 7> coriolis = model.coriolis(state);
+		      // Compute torque command from joint impedance control law.
+		      // Note: The answer to our Cartesian pose inverse kinematics is always in state.q_d with one
+		      // time step delay.
+		      std::array<double, 7> tau_d_calculated;
+		      for (size_t i = 0; i < 7; i++) {
+		        tau_d_calculated[i] =
+		            k_gains[i] * (robot_state.q_d[i] - state.q[i]) - d_gains[i] * robot_state.dq[i] + coriolis[i];
+		      }
+		      // The following line is only necessary for printing the rate limited torque. As we activated
+		      // rate limiting for the control loop (activated by default), the torque would anyway be
+		      // adjusted!
+		      std::array<double, 7> tau_d_rate_limited =
+		          franka::limitRate(franka::kMaxTorqueRate, tau_d_calculated, state.tau_J_d);
+
+		      // Send torque command.
+		      return tau_d_rate_limited;
+		    };
+   			robot.control(impedance_control_callback);
+			ros::spinOnce();
+			r.sleep();
+		}
+	}
+	
+
+	
 
 }
 
